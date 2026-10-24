@@ -12,8 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -31,6 +31,22 @@ jobs:
         run: go test ./...
       - name: Race test
         run: go test -race -short ./...
+      - name: Generate coverage profile
+        env:
+          CFGREDACT_LINEAR_LIMIT: 3s
+        run: go test -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Publish coverage summary
+        run: |
+          echo '## Test coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-coverage
+          path: coverage.out
+          if-no-files-found: error
       - name: Check known vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
