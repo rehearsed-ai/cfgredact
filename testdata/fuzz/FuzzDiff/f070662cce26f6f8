@@ -1,0 +1,2 @@
+go test fuzz v1
+string(" psk=: \n0=SENTINEL0")
