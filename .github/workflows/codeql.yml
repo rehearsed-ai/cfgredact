@@ -1,0 +1,73 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (go)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: autobuild
+      - uses: github/codeql-action/autobuild@v4
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:go"
+      - name: Publish pull request results
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- cfgredact-codeql-results -->';
+            const { owner, repo } = context.repo;
+            const ref = context.payload.pull_request.head.sha;
+            let alerts = [];
+            let unavailable = false;
+            try {
+              ({ data: alerts } = await github.rest.codeScanning.listAlertsForRepo({
+                owner,
+                repo,
+                ref,
+                state: 'open',
+                per_page: 100,
+              }));
+            } catch (error) {
+              unavailable = true;
+              core.warning(`Could not fetch CodeQL alerts: ${error.message}`);
+            }
+            const rows = alerts.slice(0, 10).map((alert) => {
+              const location = alert.most_recent_instance?.location;
+              const path = location?.path ? `\`${location.path}\`` : 'unknown location';
+              return `- **${alert.rule.id}** — ${alert.rule.security_severity_level ?? 'warning'} at ${path}`;
+            });
+            const body = unavailable
+              ? `${marker}\n## CodeQL results\n\nAnalysis completed. GitHub is still processing alert details; see the **Code scanning results** check.`
+              : `${marker}\n## CodeQL results\n\n${alerts.length === 0 ? 'No open CodeQL alerts for this pull request.' : rows.join('\n')}${alerts.length > 10 ? `\n\nShowing 10 of ${alerts.length} alerts.` : ''}`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((comment) => comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: context.issue.number, body });
+            }

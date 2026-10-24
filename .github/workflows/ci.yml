@@ -7,13 +7,27 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -31,6 +45,48 @@ jobs:
         run: go test ./...
       - name: Race test
         run: go test -race -short ./...
+      - name: Generate coverage profile
+        env:
+          CFGREDACT_LINEAR_LIMIT: 3s
+        run: go test -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Publish coverage summary
+        run: |
+          echo '## Test coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tee coverage.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish pull request coverage
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- cfgredact-coverage -->';
+            const total = fs.readFileSync('coverage.txt', 'utf8')
+              .trim()
+              .split('\n')
+              .filter((line) => line.startsWith('total:'))
+              .at(-1)
+              ?.trim() ?? 'unavailable';
+            const body = `${marker}\n## Test coverage\n\n\`${total}\``;
+            const { owner, repo } = context.repo;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((comment) => comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: context.issue.number, body });
+            }
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-coverage
+          path: coverage.out
+          if-no-files-found: error
       - name: Check known vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
