@@ -1,0 +1,2 @@
+go test fuzz v1
+string("{\"0\":10 //0,000000: [{\"name\":01010PASSW1021, \"value\":7SENTINEL0}]\n,1A2C22}")
