@@ -29,6 +29,23 @@ r.String("[auth]\nuser = a\npsk = x\n")
 - Treats every nested string as a config value of its own (JSON inside YAML, and so on).
 - Hides PEM private-key blocks and the password in `scheme://user:pass@host`. Set `SkipPEM` or `SkipURLPassword` to keep them.
 
+## Choosing an input method
+
+Use `String` when the input is serialized configuration. Use `Tree` when you
+already have a parsed value; it returns a redacted copy without changing the
+input. For example, name/value entries hide `value` when `name` matches the
+secret rule:
+
+```go
+entry := map[string]any{"name": "api_token", "value": "example-only"}
+redacted := r.Tree(entry).(map[string]any)
+// redacted["value"] == "[redacted]"
+// entry["value"] == "example-only"
+```
+
+Neither method detects secret values by their shape. Supply a `Secret` pattern
+that matches the key names used in your configuration.
+
 ## Output
 
 - If nothing is hidden, the value comes back byte for byte.
